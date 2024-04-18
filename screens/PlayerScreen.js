@@ -2,6 +2,11 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, Image, TouchableOpacity, StyleSheet, Alert } from 'react-native';
 import Sound from 'react-native-sound';
 import Icon from 'react-native-vector-icons/FontAwesome';
+import crashlytics from '@react-native-firebase/crashlytics'; // Import Crashlytics
+import analytics from '@react-native-firebase/analytics'; // Import Analytics
+import Mixpanel from 'react-native-mixpanel';
+
+
 
 const PlayerScreen = ({ route, navigation }) => {
   const { title, currentItem, currentIndex, yourPlaylist, albumCover } = route.params;
@@ -12,53 +17,39 @@ const PlayerScreen = ({ route, navigation }) => {
   const [sound, setSound] = useState(null);
 
   useEffect(() => {
-    // Cleanup function to stop and release the sound when component unmounts
-    return () => {
-      if (sound) {
-        sound.stop();
-        sound.release();
-      }
-    };
-  }, []);
-
-  useEffect(() => {
-    if (currentItem) {
-      if (sound) {
-        sound.stop(); // Stop any existing sound when the currentItem changes
-        sound.release(); // Release resources
-        setSound(null); // Reset the sound state
-      }
-      if (currentItem.path || currentItem.previewUrl) {
-        const source = currentItem.path || currentItem.previewUrl;
-        const newSound = new Sound(source, '', (error) => {
-          if (error) {
-            console.log('Error loading sound', error);
-            Alert.alert('Error', 'Failed to load the audio.');
-            return;
-          }
-          setDuration(newSound.getDuration());
-          setSound(newSound);
-          setIsPlaying(true);
-          newSound.play(() => {
-            setIsPlaying(false);
-          });
+    if (currentItem && (currentItem.path || currentItem.previewUrl)) {
+      const source = currentItem.path || currentItem.previewUrl;
+      const newSound = new Sound(source, '', (error) => {
+        if (error) {
+          console.log('Error loading sound', error);
+          crashlytics().recordError(error); // Log error to Crashlytics
+          Alert.alert('Error', 'Failed to load the audio.');
+          return;
+        }
+        setDuration(newSound.getDuration());
+        setSound(newSound);
+        setIsPlaying(true);
+        newSound.play(() => {
+          setIsPlaying(false);
         });
+        // Log play event to Analytics
+        analytics().logEvent('play_song', { song_title: currentItem.title });
+      });
 
-        const interval = setInterval(() => {
-          if (sound && isPlaying) {
-            newSound.getCurrentTime((seconds) => {
-              setCurrentTime(seconds);
-              setProgress(seconds / duration);
-            });
-          }
-        }, 1000);
+      const interval = setInterval(() => {
+        if (sound && isPlaying) {
+          newSound.getCurrentTime((seconds) => {
+            setCurrentTime(seconds);
+            setProgress(seconds / duration);
+          });
+        }
+      }, 1000);
 
-        return () => {
-          clearInterval(interval);
-          newSound.stop(); // Stop the sound
-          newSound.release(); // Release the sound
-        };
-      }
+      return () => {
+        clearInterval(interval);
+        newSound.stop();
+        newSound.release();
+      };
     }
   }, [currentItem]);
 
@@ -67,10 +58,16 @@ const PlayerScreen = ({ route, navigation }) => {
     if (sound) {
       if (isPlaying) {
         sound.pause();
+        // Log pause event to Analytics
+        analytics().logEvent('pause_song', { song_title: currentItem.title });
       } else {
         sound.play();
+        // Log play event to Analytics
+        analytics().logEvent('play_song', { song_title: currentItem.title });
       }
     }
+    Mixpanel.track(isPlaying ? 'Song Paused' : 'Song Played');
+
   };
 
   const playNext = () => {
@@ -87,10 +84,15 @@ const PlayerScreen = ({ route, navigation }) => {
         yourPlaylist,
         albumCover: nextItem.albumCover
       });
+      Mixpanel.track('Next Song Played');
+
+      // Log play next event to Analytics
+      analytics().logEvent('play_next_song', { song_title: nextItem.title });
     } else {
       console.error("Error: Next item in playlist is undefined.");
       console.log('Your Playlist:', yourPlaylist);
     }
+
   };
 
   const playPrevious = () => {
@@ -107,9 +109,18 @@ const PlayerScreen = ({ route, navigation }) => {
         yourPlaylist,
         albumCover: previousItem.albumCover
       });
+      Mixpanel.track('Previous Song Played');
+
+      // Log play previous event to Analytics
+      analytics().logEvent('play_previous_song', { song_title: previousItem.title });
     } else {
       console.error("Error: Previous item in playlist is undefined.");
     }
+  };
+
+  // Method to force a crash
+  const forceCrash = () => {
+    crashlytics().crash(); // Force crash to test Crashlytics
   };
 
   return (
@@ -135,6 +146,10 @@ const PlayerScreen = ({ route, navigation }) => {
       <View style={styles.progressBar}>
         <View style={{ width: `${progress * 100}%`, backgroundColor: '#FFFFFF', height: 5 }} />
       </View>
+      {/* Button to force crash */}
+      <TouchableOpacity onPress={forceCrash} style={styles.crashButton}>
+        <Text style={styles.crashButtonText}>Force Crash</Text>
+      </TouchableOpacity>
     </View>
   );
 };
@@ -184,6 +199,16 @@ const styles = StyleSheet.create({
     width: '80%',
     height: 5,
     backgroundColor: '#444444',
+  },
+  crashButton: {
+    marginTop: 20,
+    backgroundColor: '#FF0000',
+    padding: 10,
+    borderRadius: 5,
+  },
+  crashButtonText: {
+    color: '#FFFFFF',
+    fontWeight: 'bold',
   },
 });
 
